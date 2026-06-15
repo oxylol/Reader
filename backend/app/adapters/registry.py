@@ -1,6 +1,7 @@
 """Adapter registry — adapters self-register; core looks them up by key."""
 from __future__ import annotations
 
+from ..config import settings
 from .base import SourceAdapter
 
 _REGISTRY: dict[str, SourceAdapter] = {}
@@ -22,9 +23,16 @@ def list_adapters() -> list[SourceAdapter]:
 
 def _bootstrap() -> None:
     # Register built-in adapters. New sources only need to be imported here.
-    from .comick import ComickAdapter
+    # MangaDex is the default source (stable public API). comick is kept
+    # registered as an option but its public API is currently locked down.
+    from .mangadex import MangaDexAdapter
 
-    register(ComickAdapter())
+    register(MangaDexAdapter())
+
+    if settings.enable_comick:
+        from .comick import ComickAdapter
+
+        register(ComickAdapter())
 
 
 _bootstrap()

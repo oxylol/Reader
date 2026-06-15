@@ -48,11 +48,11 @@ Add your adapter to `adapters/registry.py`:
 
 ```python
 def _bootstrap() -> None:
-    from .comick import ComickAdapter
-    from .mysource import MySourceAdapter   # <-- new
+    from .mangadex import MangaDexAdapter
+    from .mysource import MySourceAdapter    # <-- new
 
-    register(ComickAdapter())
-    register(MySourceAdapter())             # <-- new
+    register(MangaDexAdapter())
+    register(MySourceAdapter())              # <-- new
 ```
 
 That's it — it now appears in `GET /api/browse/sources`, participates in
@@ -67,7 +67,14 @@ cross-source search/trending (with de-duplication), and can back downloads.
 - Map the site's type/status vocab to ours: type ∈ {manga, manhwa, manhua},
   status ∈ {ongoing, completed, hiatus, cancelled}.
 
-## Reference: the comick adapter
-See `backend/app/adapters/comick.py`. It uses comick's JSON API
-(`api.comick.fun`), maps country → type (`jp`→manga, `kr`→manhwa, `cn`→manhua),
-and builds image URLs from `meo.comick.pictures/{b2key}`.
+## Reference: the MangaDex adapter (default)
+See `backend/app/adapters/mangadex.py`. It uses MangaDex's public API
+(`api.mangadex.org`): `/manga` for search/trending (with `order[...]`, tag
+include/exclude resolved via `/manga/tag`, status/language/rating filters),
+`/manga/{id}/feed` for chapters, and `/at-home/server/{id}` for page images. It
+maps `originalLanguage` → type (`ja`→manga, `ko`→manhwa, `zh`→manhua).
+
+## Reference: the comick adapter (opt-in)
+See `backend/app/adapters/comick.py`. Disabled by default (`ENABLE_COMICK`)
+because comick retired its public API. Kept as a configurable example with a
+swappable API host (`COMICK_API_URL`).
