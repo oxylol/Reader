@@ -39,9 +39,9 @@ class Settings(BaseSettings):
     # Auto-update
     auto_update_interval_minutes: int = 360
 
-    # comick source — disabled by default: comick's public API is currently
-    # locked down (no stable host). Enable + set a working host if it returns.
-    enable_comick: bool = False
+    # comick source. The original comick shut down; live data is served by
+    # clone hosts, so the API host is configurable (set COMICK_API_URL once the
+    # working host is known). May sit behind Cloudflare.
     comick_api_url: str = "https://api.comick.fun"
     comick_site_url: str = "https://comick.live"
     comick_needs_cloudflare: bool = False

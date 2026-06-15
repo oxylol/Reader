@@ -48,10 +48,10 @@ Add your adapter to `adapters/registry.py`:
 
 ```python
 def _bootstrap() -> None:
-    from .mangadex import MangaDexAdapter
+    from .comick import ComickAdapter
     from .mysource import MySourceAdapter    # <-- new
 
-    register(MangaDexAdapter())
+    register(ComickAdapter())
     register(MySourceAdapter())              # <-- new
 ```
 
@@ -67,14 +67,10 @@ cross-source search/trending (with de-duplication), and can back downloads.
 - Map the site's type/status vocab to ours: type ∈ {manga, manhwa, manhua},
   status ∈ {ongoing, completed, hiatus, cancelled}.
 
-## Reference: the MangaDex adapter (default)
-See `backend/app/adapters/mangadex.py`. It uses MangaDex's public API
-(`api.mangadex.org`): `/manga` for search/trending (with `order[...]`, tag
-include/exclude resolved via `/manga/tag`, status/language/rating filters),
-`/manga/{id}/feed` for chapters, and `/at-home/server/{id}` for page images. It
-maps `originalLanguage` → type (`ja`→manga, `ko`→manhwa, `zh`→manhua).
-
-## Reference: the comick adapter (opt-in)
-See `backend/app/adapters/comick.py`. Disabled by default (`ENABLE_COMICK`)
-because comick retired its public API. Kept as a configurable example with a
-swappable API host (`COMICK_API_URL`).
+## Reference: the comick adapter
+See `backend/app/adapters/comick.py`. comick-style JSON API: `/v1.0/search`,
+`/top`, `/comic/{slug}`, `/comic/{hid}/chapters`, `/chapter/{hid}`, with page
+images from `meo.comick.pictures/{b2key}`. The API host is configurable
+(`COMICK_API_URL`) because the original comick shut down and its data is now
+served by clone hosts on rotating domains. If Browse is empty, hit
+`GET /api/admin/sources/diagnose` to see the real per-source error.

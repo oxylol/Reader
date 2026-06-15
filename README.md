@@ -38,18 +38,17 @@ future reads are instant and storage stays small.
 
 | Decision | Choice |
 | --- | --- |
-| Default source | `mangadex` (stable public API, no Cloudflare) |
-| comick | opt-in (`ENABLE_COMICK=true`) — its public API is currently locked down |
+| Source | `comick` (configurable API host via `COMICK_API_URL`) |
 | Compression | WebP @ `0.8` |
 | HTTPS | via Tailscale / reverse proxy in front |
 | Backend | Python / FastAPI |
 | DB | SQLite (single-box); Postgres supported via `DATABASE_URL` |
 
-> **Source note:** the build originally targeted comick, but comick has since
-> retired its public API (the `api.comick.*` hosts are dead and access is gated
-> toward the Tachiyomi extension). Thanks to the pluggable adapter design the
-> source was swapped to **MangaDex** with no changes to the reader, library,
-> download pipeline, or PWA. See [`docs/ADAPTERS.md`](docs/ADAPTERS.md).
+> **Source note:** the original comick shut down and its data is now served by
+> clone hosts on rotating domains, so the comick API host is **configurable**
+> (`COMICK_API_URL`) rather than hard-coded. The pluggable adapter design means
+> swapping or adding sources never touches the reader, library, download
+> pipeline, or PWA. See [`docs/ADAPTERS.md`](docs/ADAPTERS.md).
 
 ## Quick start
 
