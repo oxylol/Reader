@@ -56,6 +56,9 @@ Then open the app (default `http://localhost:8080`). Log in with the admin
 account from `.env`. Put Tailscale / a reverse proxy in front for HTTPS so the
 PWA installs.
 
+**Full step-by-step setup** (Docker, Tailscale HTTPS, PWA install, backups,
+Postgres, troubleshooting): see [`docs/INSTALL.md`](docs/INSTALL.md).
+
 ## Architecture
 
 ```
