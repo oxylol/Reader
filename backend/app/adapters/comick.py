@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ..config import settings
 from ..services import http
 from .base import (
     AdapterError,
@@ -18,7 +19,6 @@ from .base import (
     TrendingParams,
 )
 
-API = "https://api.comick.fun"
 IMG_BASE = "https://meo.comick.pictures"
 
 # comick country code -> our type
@@ -97,10 +97,15 @@ def _parse_number(chap: str | None) -> tuple[float, str]:
 class ComickAdapter(SourceAdapter):
     key = "comick"
     name = "Comick"
-    base_url = "https://comick.live"
-    needs_cloudflare = False  # JSON API is usually open; falls back automatically
+    base_url = settings.comick_site_url
+    # JSON API is usually open; the shared client also auto-solves on 403/503.
+    needs_cloudflare = settings.comick_needs_cloudflare
     supports_trending = True
     supports_advanced_search = True
+
+    @property
+    def api(self) -> str:
+        return settings.comick_api_url.rstrip("/")
 
     async def search(self, filters: SearchFilters) -> list[SeriesResult]:
         params: dict[str, Any] = {
@@ -218,7 +223,7 @@ class ComickAdapter(SourceAdapter):
 
     async def _get(self, path: str, params: Optional[dict[str, Any]] = None) -> Any:
         return await http.fetch_json(
-            f"{API}{path}",
+            f"{self.api}{path}",
             params=params,
             needs_cloudflare=self.needs_cloudflare,
             headers={"Accept": "application/json", "Referer": self.base_url},

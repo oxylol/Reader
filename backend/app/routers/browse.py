@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from difflib import SequenceMatcher
 
 from fastapi import APIRouter, Depends, Query
@@ -25,6 +26,7 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/api/browse", tags=["browse"])
+log = logging.getLogger("inkvault.browse")
 
 
 def _norm_title(t: str) -> str:
@@ -114,7 +116,7 @@ async def trending(
         try:
             all_results.extend(await adapter.trending(params))
         except Exception:  # noqa: BLE001
-            continue
+            log.exception("trending failed for source %s", adapter.key)
     items = _dedupe(all_results)
     await _mark_in_library(session, user.id, items)
     return items
@@ -148,6 +150,7 @@ async def search(
         try:
             return await get_adapter(key).search(filters)
         except Exception:  # noqa: BLE001
+            log.exception("search failed for source %s", key)
             return []
 
     gathered = await asyncio.gather(*(run(k) for k in target_keys))

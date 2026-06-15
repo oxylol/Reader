@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # Auto-update
     auto_update_interval_minutes: int = 360
 
+    # comick source — API host is configurable because comick rotates domains
+    # and sometimes puts the API behind Cloudflare.
+    comick_api_url: str = "https://api.comick.fun"
+    comick_site_url: str = "https://comick.live"
+    comick_needs_cloudflare: bool = False
+
     @property
     def library_path(self) -> Path:
         p = Path(self.library_dir)
