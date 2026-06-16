@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, coverUrl } from "../lib/api";
 import type { DiscoverItem, SearchRequest } from "../lib/types";
 
 const SHELVES = [
@@ -300,9 +300,12 @@ function DiscoverRow({ item }: { item: DiscoverItem }) {
     <div className="discover-row">
       <img
         className="cover"
-        src={item.cover_url || "/icon-512.png"}
+        src={coverUrl(item.cover_url)}
         alt={item.title}
         loading="lazy"
+        onError={(e) => {
+          (e.target as HTMLImageElement).src = "/icon-512.png";
+        }}
       />
       <div className="info">
         <h3>{item.title}</h3>

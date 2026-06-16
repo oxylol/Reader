@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, coverUrl } from "../lib/api";
 import CoverCard from "../components/CoverCard";
 
 export default function Library() {
@@ -34,7 +34,7 @@ export default function Library() {
                   <div style={{ position: "relative" }}>
                     <img
                       className="cover"
-                      src={c.series.cover_url || "/icon-512.png"}
+                      src={coverUrl(c.series.cover_url)}
                       alt={c.series.title}
                     />
                     <span className="type-tag">Ch. {c.chapter.number_label}</span>

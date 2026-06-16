@@ -56,6 +56,13 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Route a remote cover image through the backend proxy (hotlink-protected CDNs). */
+export function coverUrl(url: string | null | undefined): string {
+  if (!url) return "/icon-512.png";
+  if (url.startsWith("/")) return url;
+  return `/api/img?url=${encodeURIComponent(url)}`;
+}
+
 export const api = {
   // auth
   async login(username: string, password: string): Promise<string> {
@@ -113,7 +120,7 @@ export const api = {
   // reader
   chapterInfo: (id: number) => req<ChapterInfo>(`/read/chapter/${id}`),
   pageUrl: (chapterId: number, index: number) =>
-    `/api/read/chapter/${chapterId}/page/${index}`,
+    `/api/read/chapter/${chapterId}/page/${index}?t=${getToken() ?? ""}`,
   saveProgress: (
     chapter_id: number,
     page: number,

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { coverUrl } from "../lib/api";
 
 interface Props {
   to?: string;
@@ -15,7 +16,7 @@ export default function CoverCard({ to, title, cover, type, badge, onClick }: Pr
       <div style={{ position: "relative" }}>
         <img
           className="cover"
-          src={cover || "/icon-512.png"}
+          src={coverUrl(cover)}
           alt={title}
           loading="lazy"
           onError={(e) => {

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, coverUrl } from "../lib/api";
 
 export default function SeriesPage() {
   const { id } = useParams();
@@ -13,10 +13,6 @@ export default function SeriesPage() {
     queryKey: ["series", seriesId],
     queryFn: () => api.series(seriesId),
   });
-  const { data: chapters, isLoading } = useQuery({
-    queryKey: ["chapters", seriesId],
-    queryFn: () => api.chapters(seriesId),
-  });
   const { data: job } = useQuery({
     queryKey: ["job", seriesId],
     queryFn: () => api.jobForSeries(seriesId),
@@ -24,6 +20,14 @@ export default function SeriesPage() {
       const s = q.state.data?.state;
       return s === "running" || s === "queued" ? 2000 : false;
     },
+  });
+  const jobActive = job?.state === "running" || job?.state === "queued";
+  const { data: chapters, isLoading } = useQuery({
+    queryKey: ["chapters", seriesId],
+    queryFn: () => api.chapters(seriesId),
+    // While a download job is populating chapters, keep refetching so the list
+    // fills in without a manual reload.
+    refetchInterval: jobActive ? 3000 : false,
   });
 
   const unfollow = useMutation({
@@ -58,7 +62,7 @@ export default function SeriesPage() {
       </header>
       <div className="content">
         <div className="series-hero">
-          <img className="cover" src={series.cover_url || "/icon-512.png"} alt={series.title} />
+          <img className="cover" src={coverUrl(series.cover_url)} alt={series.title} />
           <div className="series-meta">
             <h2>{series.title}</h2>
             <div className="muted">

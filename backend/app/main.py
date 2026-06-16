@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .db import async_session, init_db
-from .routers import admin, auth, browse, library, prefs, reader, series
+from .routers import admin, auth, browse, images, library, prefs, reader, series
 from .services.http import close_client
 from .workers.queue import start_workers, stop_workers
 from .workers.scheduler import start_scheduler, stop_scheduler
@@ -46,7 +46,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for r in (auth, library, series, browse, reader, prefs, admin):
+for r in (auth, library, series, browse, reader, prefs, admin, images):
     app.include_router(r.router)
 
 

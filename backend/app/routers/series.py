@@ -94,15 +94,39 @@ async def list_series_chapters(
     series = await session.get(Series, series_id)
     if not series:
         raise HTTPException(404, "Series not found")
-    if refresh:
-        await sync_chapters(session, series)
-    chapters = (
-        await session.execute(
-            select(Chapter)
-            .where(Chapter.series_id == series_id)
-            .order_by(Chapter.number)
+
+    async def _load() -> list[Chapter]:
+        return list(
+            (
+                await session.execute(
+                    select(Chapter)
+                    .where(Chapter.series_id == series_id)
+                    .order_by(Chapter.number)
+                )
+            ).scalars().all()
         )
-    ).scalars().all()
+
+    chapters = await _load()
+
+    # Lazy fallback: if the chapter list is empty (e.g. a download job failed or
+    # hasn't started) and no job is currently populating it, sync inline so the
+    # series page is never stuck empty.
+    if refresh or not chapters:
+        active = (
+            await session.execute(
+                select(DownloadJob).where(
+                    DownloadJob.series_id == series_id,
+                    DownloadJob.state.in_([JobState.queued, JobState.running]),
+                )
+            )
+        ).scalar_one_or_none()
+        if refresh or not active:
+            try:
+                await sync_chapters(session, series)
+                chapters = await _load()
+            except Exception:  # noqa: BLE001 - surface as empty rather than 500
+                pass
+
     return [await build_chapter_out(session, c, user.id) for c in chapters]
 
 

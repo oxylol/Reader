@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.deps import get_current_user
+from ..core.security import decode_token
 from ..db import get_session
 from ..models import Chapter, ReadingProgress, Series, User
 from ..models import utcnow
@@ -25,9 +26,13 @@ router = APIRouter(prefix="/api/read", tags=["reader"])
 async def get_page(
     chapter_id: int,
     index: int,
-    _: User = Depends(get_current_user),
+    t: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
+    # <img> tags can't send the Authorization header, so accept the JWT via a
+    # `t` query param. Any valid token may read page images.
+    if not t or not decode_token(t):
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
     chapter = await session.get(Chapter, chapter_id)
     if not chapter or not chapter.downloaded or not chapter.cbz_path:
         raise HTTPException(404, "Chapter not downloaded")
