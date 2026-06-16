@@ -12,13 +12,13 @@ from ..models import (
     DownloadJob,
     JobState,
     LibraryEntry,
+    ReadingProgress,
     Series,
     User,
 )
 from ..schemas import AddSeriesRequest, ChapterOut, JobOut, SeriesOut
 from ..services.downloader import sync_chapters
 from ..services.series_service import (
-    build_chapter_out,
     build_series_out,
     ensure_series_from_source,
 )
@@ -127,7 +127,38 @@ async def list_series_chapters(
             except Exception:  # noqa: BLE001 - surface as empty rather than 500
                 pass
 
-    return [await build_chapter_out(session, c, user.id) for c in chapters]
+    # Batch-load this user's progress for the whole series in one query to
+    # avoid an N+1 (this endpoint is polled while downloads run).
+    progress_rows = (
+        await session.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.user_id == user.id,
+                ReadingProgress.series_id == series_id,
+            )
+        )
+    ).scalars().all()
+    prog = {p.chapter_id: p for p in progress_rows}
+
+    out = []
+    for c in chapters:
+        p = prog.get(c.id)
+        out.append(
+            ChapterOut(
+                id=c.id,
+                number=c.number,
+                number_label=c.number_label,
+                volume=c.volume,
+                title=c.title,
+                language=c.language,
+                scanlation_group=c.scanlation_group,
+                page_count=c.page_count,
+                downloaded=c.downloaded,
+                size_bytes=c.size_bytes,
+                read=p.completed if p else False,
+                current_page=p.page if p else 0,
+            )
+        )
+    return out
 
 
 @router.post("/{series_id}/download", response_model=JobOut)

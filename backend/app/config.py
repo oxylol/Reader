@@ -31,7 +31,8 @@ class Settings(BaseSettings):
 
     # Downloader
     max_parallel_downloads: int = 4
-    source_rate_limit_seconds: float = 0.5
+    download_page_concurrency: int = 4
+    source_rate_limit_seconds: float = 0.1
 
     # Cloudflare solver
     flaresolverr_url: str = "http://flaresolverr:8191/v1"

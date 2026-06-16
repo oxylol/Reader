@@ -65,17 +65,26 @@ async def _download_chapter(series: Series, chapter: Chapter) -> tuple[int, int]
         raise RuntimeError("no pages returned")
 
     img_headers = getattr(adapter, "image_headers", None)
-    dest = storage.chapter_cbz_path(series, chapter)
-    writer = CbzWriter(dest)
-    try:
-        for i, url in enumerate(urls):
+    rate = settings.source_rate_limit_seconds
+    sem = asyncio.Semaphore(max(1, settings.download_page_concurrency))
+
+    async def fetch_one(index: int, url: str) -> tuple[int, bytes]:
+        async with sem:
             raw = await http.fetch_bytes(
                 url, needs_cloudflare=adapter.needs_cloudflare, headers=img_headers
             )
-            compressed = await asyncio.to_thread(compress_image, raw)
-            writer.add_page(i, compressed)
-            if settings.source_rate_limit_seconds:
-                await asyncio.sleep(settings.source_rate_limit_seconds)
+            if rate:
+                await asyncio.sleep(rate)  # politeness, inside the slot
+        # Encode off the event loop; ordering is restored when writing.
+        return index, await asyncio.to_thread(compress_image, raw)
+
+    results = await asyncio.gather(*(fetch_one(i, u) for i, u in enumerate(urls)))
+
+    dest = storage.chapter_cbz_path(series, chapter)
+    writer = CbzWriter(dest)
+    try:
+        for index, data in sorted(results, key=lambda x: x[0]):
+            writer.add_page(index, data)
         size = writer.finalize()
     except Exception:
         writer.abort()
