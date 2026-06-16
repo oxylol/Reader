@@ -40,10 +40,11 @@ class Settings(BaseSettings):
     auto_update_interval_minutes: int = 360
 
     # comick source. The original comick shut down; live data is served by
-    # clone hosts, so the API host is configurable (set COMICK_API_URL once the
-    # working host is known). May sit behind Cloudflare.
-    comick_api_url: str = "https://api.comick.fun"
-    comick_site_url: str = "https://comick.live"
+    # clone hosts (comick.art / comick.live) running a Laravel API at the site
+    # origin under /api. comick.art serves it without Cloudflare; comick.live
+    # fronts /api/search with Cloudflare (set COMICK_NEEDS_CLOUDFLARE=true).
+    comick_api_url: str = "https://comick.art"
+    comick_site_url: str = "https://comick.art"
     comick_needs_cloudflare: bool = False
 
     @property

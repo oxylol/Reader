@@ -64,11 +64,14 @@ async def _download_chapter(series: Series, chapter: Chapter) -> tuple[int, int]
     if not urls:
         raise RuntimeError("no pages returned")
 
+    img_headers = getattr(adapter, "image_headers", None)
     dest = storage.chapter_cbz_path(series, chapter)
     writer = CbzWriter(dest)
     try:
         for i, url in enumerate(urls):
-            raw = await http.fetch_bytes(url, needs_cloudflare=adapter.needs_cloudflare)
+            raw = await http.fetch_bytes(
+                url, needs_cloudflare=adapter.needs_cloudflare, headers=img_headers
+            )
             compressed = await asyncio.to_thread(compress_image, raw)
             writer.add_page(i, compressed)
             if settings.source_rate_limit_seconds:

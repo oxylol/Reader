@@ -1,11 +1,22 @@
-"""comick adapter (comick.live / api.comick.fun).
+"""comick adapter (comick.art clone of the shut-down comick.io).
 
-Uses comick's public JSON API. The reading site is comick.live; the JSON API
-lives at api.comick.fun and is what we hit for search, metadata, chapters and
-page images. Image blobs are served from meo.comick.pictures.
+The original comick.io shut down; its catalogue is now served by clone hosts
+(comick.art / comick.live) running a Laravel API at the site origin under
+``/api``. comick.art serves the API without Cloudflare. Endpoints (reverse
+engineered from the site's JS bundles):
+
+  - search    GET /api/search?q=&limit=&page=
+  - trending  GET /api/comics/top?day=&type=
+  - genres    GET /api/metadata
+  - chapters  GET /api/comics/{slug}/chapter-list?page=        (paginated)
+  - pages     GET /api/comics/{slug}/{hid}-chapter-{chap}-{lang}  -> images[].url
+
+Page images are full URLs on cdn1.comicknew.pictures and are fetched with a
+Referer to avoid hotlink protection (see ``image_headers``).
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from ..config import settings
@@ -19,62 +30,28 @@ from .base import (
     TrendingParams,
 )
 
-IMG_BASE = "https://meo.comick.pictures"
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
 
 # comick country code -> our type
-_COUNTRY_TYPE = {"jp": "manga", "kr": "manhwa", "cn": "manhua"}
+_COUNTRY_TYPE = {"kr": "manhwa", "jp": "manga", "cn": "manhua"}
 _TYPE_COUNTRY = {v: k for k, v in _COUNTRY_TYPE.items()}
-# our status -> comick status int
-_STATUS_INT = {"ongoing": 1, "completed": 2, "cancelled": 3, "hiatus": 4}
-_STATUS_NAME = {1: "ongoing", 2: "completed", 3: "cancelled", 4: "hiatus"}
-# our sort -> comick sort
-_SORT = {
-    "popularity": "follow",
-    "rating": "rating",
-    "latest": "uploaded",
-    "recent": "created",
-    "alpha": "user_follow_count",  # comick has no alpha; fall back
-    "chapters": "follow",
-}
-_TIMEFRAME_DAYS = {"today": "7", "week": "7", "month": "30", "all": "90"}
+# comick status int -> our status
+_STATUS = {1: "ongoing", 2: "completed", 3: "cancelled", 4: "hiatus"}
+# trending timeframe -> top "day" param
+_DAY = {"today": 1, "week": 7, "month": 30, "all": 180}
 
 
-def _cover_url(md_covers: Optional[list[dict[str, Any]]]) -> str:
-    if md_covers:
-        key = md_covers[0].get("b2key")
-        if key:
-            return f"{IMG_BASE}/{key}"
-    return ""
-
-
-def _series_from_json(d: dict[str, Any]) -> SeriesResult:
-    comic = d.get("comic", d)
-    country = (comic.get("country") or "").lower()
-    md_titles = comic.get("md_titles") or []
-    alt = [t.get("title", "") for t in md_titles if t.get("title")]
-    genres: list[str] = []
-    for g in comic.get("md_comic_md_genres", []) or []:
-        name = (g.get("md_genres") or {}).get("name")
-        if name:
-            genres.append(name)
-    return SeriesResult(
-        source="comick",
-        source_id=comic.get("hid", ""),
-        slug=comic.get("slug", ""),
-        title=comic.get("title", ""),
-        cover_url=_cover_url(comic.get("md_covers")),
-        type=_COUNTRY_TYPE.get(country, "unknown"),
-        status=_STATUS_NAME.get(comic.get("status"), "unknown"),
-        description=comic.get("desc", "") or "",
-        alt_titles=alt,
-        original_language=country,
-        year=comic.get("year"),
-        content_rating=comic.get("content_rating", "") or "",
-        tags=genres,
-        rating=_safe_float(comic.get("bayesian_rating") or comic.get("rating")),
-        follow_count=comic.get("user_follow_count") or comic.get("follow_count"),
-        last_updated=comic.get("uploaded_at") or comic.get("last_chapter"),
-    )
+def _num(chap: Any) -> tuple[float, str]:
+    if chap is None or chap == "":
+        return (0.0, "")
+    label = str(chap)
+    try:
+        return (float(label), label)
+    except ValueError:
+        return (0.0, label)
 
 
 def _safe_float(v: Any) -> Optional[float]:
@@ -84,141 +61,192 @@ def _safe_float(v: Any) -> Optional[float]:
         return None
 
 
-def _parse_number(chap: str | None) -> tuple[float, str]:
-    if not chap:
-        return (0.0, "")
-    label = str(chap)
-    try:
-        return (float(label), label)
-    except ValueError:
-        return (0.0, label)
-
-
 class ComickAdapter(SourceAdapter):
     key = "comick"
     name = "Comick"
     base_url = settings.comick_site_url
-    # JSON API is usually open; the shared client also auto-solves on 403/503.
     needs_cloudflare = settings.comick_needs_cloudflare
     supports_trending = True
     supports_advanced_search = True
+
+    def __init__(self) -> None:
+        self._genres: dict[int, str] | None = None  # id -> name
+        self._genre_ids: dict[str, int] | None = None  # lower name -> id
 
     @property
     def api(self) -> str:
         return settings.comick_api_url.rstrip("/")
 
+    @property
+    def image_headers(self) -> dict[str, str]:
+        # cdn images are hotlink-protected; send a Referer + browser UA.
+        return {"User-Agent": BROWSER_UA, "Referer": self.base_url + "/"}
+
+    # ---- metadata / genres ----
+    async def _load_genres(self) -> None:
+        if self._genres is not None:
+            return
+        data = await self._get("/api/metadata")
+        self._genres = {}
+        self._genre_ids = {}
+        for g in (data or {}).get("genres", []):
+            gid, name = g.get("id"), g.get("name")
+            if gid is not None and name:
+                self._genres[gid] = name
+                self._genre_ids[name.lower()] = gid
+
+    def _genre_names(self, ids: list[Any]) -> list[str]:
+        if not self._genres:
+            return []
+        out = []
+        for i in ids or []:
+            name = self._genres.get(i)
+            if name:
+                out.append(name)
+        return out
+
+    # ---- result mapping ----
+    async def _to_series(self, item: dict[str, Any]) -> SeriesResult:
+        await self._load_genres()
+        country = (item.get("country") or "").lower()
+        genres = item.get("genres") or []
+        # genres are numeric ids (top/comic) -> map to names; ignore if names
+        tags = self._genre_names([g for g in genres if isinstance(g, int)])
+        alt = [t for t in (item.get("titles") or []) if isinstance(t, str)]
+        return SeriesResult(
+            source="comick",
+            source_id=item.get("slug", ""),
+            slug=item.get("slug", ""),
+            title=item.get("title", "") or "(untitled)",
+            cover_url=item.get("default_thumbnail", "") or "",
+            type=_COUNTRY_TYPE.get(country, "unknown"),
+            status=_STATUS.get(item.get("status"), "unknown"),
+            description=(item.get("description") or item.get("parsed_description") or "").strip(),
+            alt_titles=alt,
+            original_language=country,
+            year=item.get("year"),
+            content_rating=item.get("content_rating", "") or "",
+            tags=tags,
+            rating=_safe_float(item.get("bayesian_rating")),
+            follow_count=item.get("user_follow_count") or item.get("follow_count"),
+            chapter_count=item.get("chapter_count"),
+        )
+
+    # ---- search ----
     async def search(self, filters: SearchFilters) -> list[SeriesResult]:
-        params: dict[str, Any] = {
-            "page": filters.page,
-            "limit": filters.limit,
-            "tachiyomi": "true",
-        }
-        if filters.query:
-            params["q"] = filters.query
-        params["sort"] = _SORT.get(filters.sort, "follow")
-        if filters.include_tags:
-            params["genres"] = filters.include_tags
-        if filters.exclude_tags:
-            params["excludes"] = filters.exclude_tags
-        countries = [_TYPE_COUNTRY[t] for t in filters.types if t in _TYPE_COUNTRY]
-        if countries:
-            params["country"] = countries
-        statuses = [_STATUS_INT[s] for s in filters.status if s in _STATUS_INT]
-        if len(statuses) == 1:
-            params["status"] = statuses[0]
-        if filters.year_from:
-            params["from"] = filters.year_from
-        if filters.year_to:
-            params["to"] = filters.year_to
-        if filters.content_rating:
-            params["content_rating"] = filters.content_rating
+        if not filters.query:
+            # No free-text query -> fall back to popular for a useful result set.
+            return await self.trending(TrendingParams(timeframe="all", limit=filters.limit))
+        params = {"q": filters.query, "limit": min(filters.limit, 50), "page": filters.page}
+        data = await self._get("/api/search", params)
+        items = (data or {}).get("data", []) if isinstance(data, dict) else []
+        results = [await self._to_series(it) for it in items]
+        return self._apply_client_filters(results, filters)
 
-        data = await self._get("/v1.0/search", params=params)
-        if not isinstance(data, list):
-            return []
-        return [_series_from_json(item) for item in data]
+    def _apply_client_filters(
+        self, results: list[SeriesResult], f: SearchFilters
+    ) -> list[SeriesResult]:
+        # comick's /api/search is title-only; apply the rest client-side so the
+        # Browse filters still narrow results.
+        def ok(r: SeriesResult) -> bool:
+            if f.types and r.type not in f.types:
+                return False
+            if f.status and r.status not in f.status:
+                return False
+            if f.year_from and (r.year or 0) < f.year_from:
+                return False
+            if f.year_to and (r.year or 9999) > f.year_to:
+                return False
+            low = {t.lower() for t in r.tags}
+            if f.include_tags and not all(t.lower() in low for t in f.include_tags):
+                return False
+            if f.exclude_tags and any(t.lower() in low for t in f.exclude_tags):
+                return False
+            return True
 
+        return [r for r in results if ok(r)]
+
+    # ---- trending ----
     async def trending(self, params: TrendingParams) -> list[SeriesResult]:
-        data = await self._get("/top", params={"comic_types": "manga,manhwa,manhua"})
-        if not isinstance(data, dict):
-            return []
-        results: list[dict[str, Any]] = []
-        if params.shelf == "trending":
-            days = _TIMEFRAME_DAYS.get(params.timeframe, "7")
-            trending = data.get("trending") or {}
-            results = trending.get(days) or trending.get("7") or []
-        elif params.shelf == "latest":
-            results = data.get("news") or data.get("extendedNews") or []
-        elif params.shelf == "newly_added":
-            nc = data.get("topFollowNewComics") or {}
-            results = nc.get("7") or nc.get("30") or []
-        elif params.shelf == "top_rated":
-            results = data.get("rank") or []
-        else:
-            results = data.get("trending", {}).get("7", [])
-        return [_series_from_json(item) for item in results]
+        q: dict[str, Any] = {"day": _DAY.get(params.timeframe, 7)}
+        data = await self._get("/api/comics/top", q)
+        items = (data or {}).get("data", []) if isinstance(data, dict) else []
+        return [await self._to_series(it) for it in items[: params.limit]]
 
+    # ---- series detail ----
     async def get_series(self, source_id: str) -> SeriesResult:
-        # source_id may be hid or slug; comick accepts slug on /comic/{slug}
-        data = await self._get(f"/comic/{source_id}", params={"tachiyomi": "true"})
-        if not isinstance(data, dict) or "comic" not in data:
-            raise AdapterError(f"Series not found: {source_id}")
-        return _series_from_json(data)
+        slug = source_id
+        # Best source of rich metadata is the search index; match by exact slug.
+        q = re.sub(r"^[\d\s]+", "", slug.replace("-", " ")).strip() or slug
+        data = await self._get("/api/search", {"q": q, "limit": 30})
+        for it in (data or {}).get("data", []):
+            if it.get("slug") == slug:
+                return await self._to_series(it)
+        # Fallback: pull the comic object embedded in a chapter read response.
+        cl = await self._get(f"/api/comics/{slug}/chapter-list", {"page": 1})
+        items = (cl or {}).get("data", []) if isinstance(cl, dict) else []
+        if items:
+            ch = items[0]
+            seg = f"{ch['hid']}-chapter-{ch['chap']}-{ch.get('lang', 'en')}"
+            rd = await self._get(f"/api/comics/{slug}/{seg}")
+            comic = (rd or {}).get("chapter", {}).get("comic", {})
+            if comic:
+                comic.setdefault("slug", slug)
+                return await self._to_series(comic)
+        raise AdapterError(f"Series not found: {slug}")
 
+    # ---- chapters ----
     async def list_chapters(
         self, source_id: str, language: str = "en"
     ) -> list[ChapterResult]:
-        # need hid; if a slug was passed, resolve to hid first
-        hid = source_id
-        if len(source_id) > 12 or "-" in source_id:
-            series = await self.get_series(source_id)
-            hid = series.source_id
+        slug = source_id
         chapters: list[ChapterResult] = []
         page = 1
         while True:
-            data = await self._get(
-                f"/comic/{hid}/chapters",
-                params={"lang": language, "page": page, "limit": 100, "tachiyomi": "true"},
-            )
-            items = (data or {}).get("chapters", []) if isinstance(data, dict) else []
-            if not items:
+            data = await self._get(f"/api/comics/{slug}/chapter-list", {"page": page})
+            if not isinstance(data, dict):
                 break
-            for ch in items:
-                num, label = _parse_number(ch.get("chap"))
+            for ch in data.get("data", []):
+                lang = ch.get("lang", "")
+                if language and lang != language:
+                    continue
+                num, label = _num(ch.get("chap"))
+                hid = ch.get("hid")
+                if not hid:
+                    continue
+                seg = f"{hid}-chapter-{ch.get('chap')}-{lang or language}"
                 groups = ch.get("group_name") or []
                 chapters.append(
                     ChapterResult(
-                        source_chapter_id=ch.get("hid", ""),
+                        # pack slug + segment so get_page_urls can rebuild the URL
+                        source_chapter_id=f"{slug}/{seg}",
                         number=num,
                         number_label=label,
                         volume=str(ch.get("vol") or ""),
                         title=ch.get("title") or "",
-                        language=ch.get("lang") or language,
-                        scanlation_group=", ".join(groups) if groups else "",
+                        language=lang or language,
+                        scanlation_group=", ".join(groups) if isinstance(groups, list) else str(groups or ""),
                         published_at=ch.get("created_at") or ch.get("publish_at"),
                     )
                 )
-            total = (data or {}).get("total", 0)
-            if page * 100 >= total or len(items) < 100:
+            pg = data.get("pagination") or {}
+            last = pg.get("last_page", page)
+            if page >= last:
                 break
             page += 1
-        # de-dupe by number, keep first (comick returns newest groups first)
         return chapters
 
+    # ---- pages ----
     async def get_page_urls(self, source_chapter_id: str) -> list[str]:
-        data = await self._get(
-            f"/chapter/{source_chapter_id}", params={"tachiyomi": "true"}
-        )
-        if not isinstance(data, dict):
-            return []
-        chapter = data.get("chapter", data)
-        images = chapter.get("md_images") or chapter.get("images") or []
-        urls: list[str] = []
+        # source_chapter_id == "{slug}/{hid}-chapter-{chap}-{lang}"
+        data = await self._get(f"/api/comics/{source_chapter_id}")
+        chapter = (data or {}).get("chapter", {}) if isinstance(data, dict) else {}
+        images = chapter.get("images") or []
+        urls = []
         for img in images:
-            key = img.get("b2key") or img.get("url")
-            if not key:
-                continue
-            urls.append(key if key.startswith("http") else f"{IMG_BASE}/{key}")
+            u = img.get("url") if isinstance(img, dict) else None
+            if u:
+                urls.append(u)
         return urls
 
     async def _get(self, path: str, params: Optional[dict[str, Any]] = None) -> Any:
@@ -226,5 +254,9 @@ class ComickAdapter(SourceAdapter):
             f"{self.api}{path}",
             params=params,
             needs_cloudflare=self.needs_cloudflare,
-            headers={"Accept": "application/json", "Referer": self.base_url},
+            headers={
+                "Accept": "application/json",
+                "User-Agent": BROWSER_UA,
+                "Referer": self.base_url + "/",
+            },
         )
